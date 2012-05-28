@@ -24,6 +24,10 @@ using namespace cv;
 Point X1, X11, X2, X22;
 ofstream outDebug("D:\\debug.txt", ios::out);
 
+Point corner11, corner22, corner11Y, corner22Y;
+int Xcoor,Ycoor;
+bool clicked = false;
+
 string PrintMode(int mode)
 {
 	const string NoTracking("NO_TRACKING");
@@ -91,8 +95,33 @@ public:
 	double	residualVariance; // variance of residuals e=z-ax-by-c
 
 	int	frontoPlaneFit(const XnDepthPixel*, Camera*, Rect, float, float);
-	int	updatePlaneFit(const XnDepthPixel*, const XnRGB24Pixel* colors, Camera*, Rect, Mat& weighFrameDepth, Mat& wighFrameColor);
+	int	updatePlaneFit(const XnDepthPixel*, const XnRGB24Pixel* colors, Camera*, Rect, Mat& weighFrameDepth, Mat& wighFrameColor, bool flag);
 };
+
+
+
+void getCoordinates_onMouse(int event, int x, int y, int flags, void* param)
+{
+	if (event == CV_EVENT_LBUTTONDOWN)
+	{
+		Xcoor = x;
+		Ycoor = y;
+		clicked = true;
+		
+//		XnDepthPixel* depthMap = (XnDepthPixel*)param;
+//		int xCoor, yCoor;
+//		XnFloat depth = depthMap[yCoor * XN_VGA_X_RES + xCoor];
+//		if (depth == 0)
+//		{
+//			cout << "Got noise." << endl;
+////			recoverFromNoiseSinglePoint(xCoor, yCoor, depthMap);
+//		}
+//		else
+//		{
+//
+//		}
+	}
+}
 
 int main()
 {
@@ -132,12 +161,12 @@ int main()
 	// Initialise sensors
 	nRetVal = context.Init();
 
-//	context.OpenFileRecording("D:\\TwoKinectsRecording\\cam1.oni");
-//	context.FindExistingNode(XN_NODE_TYPE_DEPTH, depthGenerator);
-//	context.FindExistingNode(XN_NODE_TYPE_IMAGE, imageGenerator);
+	context.OpenFileRecording("D:\\TwoKinectsRecording\\cam111.oni");
+	context.FindExistingNode(XN_NODE_TYPE_DEPTH, depthGenerator);
+	context.FindExistingNode(XN_NODE_TYPE_IMAGE, imageGenerator);
 
-	nRetVal = imageGenerator.Create(context);
-	nRetVal = depthGenerator.Create(context);
+//	nRetVal = imageGenerator.Create(context);
+//	nRetVal = depthGenerator.Create(context);
 
 	nRetVal = context.StartGeneratingAll();
 
@@ -164,6 +193,8 @@ int main()
     selectWindow.width = corner.x-origin.x;
     selectWindow.height = corner.y-origin.y;
 	int c = 0;
+	bool flag = false;
+	double FACTOR = kinectCamera.pSize/kinectCamera.FocalLength;
 	// MAIN LOOP -------------------------------------------------------------------------
 	while (bContinueLoop)
 	{
@@ -183,7 +214,7 @@ int main()
 		// Copy RGB Generator data into Mat Frame (For display only)
 		ConvertXnRGB24PixelToFrame(pImageMap,Frame);
  
-		cout << "[Mode=" << PrintMode(trackingMode) << "] ";
+//		cout << "[Mode=" << PrintMode(trackingMode) << "] ";
 
 		if( trackingMode!=NO_TRACKING )
         {
@@ -207,7 +238,7 @@ rectangle(WeighImg_II, Point(myPlane.fitWindow.x, myPlane.fitWindow.y), Point(my
 			// Track Model
 			else
 			{
-				err = myPlane.updatePlaneFit( pDepthMap, pImageMap, &kinectCamera, myPlane.fitWindow, WeighImg_I, WeighImg_II);
+				err = myPlane.updatePlaneFit( pDepthMap, pImageMap, &kinectCamera, myPlane.fitWindow, WeighImg_I, WeighImg_II, flag);
 
 	rectangle(Frame, Point(myPlane.fitWindow.x, myPlane.fitWindow.y), Point(myPlane.fitWindow.x+myPlane.fitWindow.width, myPlane.fitWindow.y+myPlane.fitWindow.height),Scalar(0,0,255), 1,1,0);			
 	circle(Frame, Point(myPlane.fitWindow.x, myPlane.fitWindow.y),2, Scalar(255,0,0));
@@ -251,23 +282,47 @@ rectangle(WeighImg_II, Point(myPlane.fitWindow.x, myPlane.fitWindow.y), Point(my
 		line(Frame, centroid2D, point2DY, Scalar(0,0,255), 1, 1, 0);
 		line(Frame, centroid2D, point2DZ, Scalar(0,255,0), 1, 1, 0);
 
+		circle(Frame, corner11, 2, Scalar::all(0), 3);
+		circle(Frame, corner22, 2, Scalar::all(255), 3);
+
+		circle(Frame, corner11Y, 2, Scalar::all(0), 3);
+		circle(Frame, corner22Y, 2, Scalar::all(255), 3);
+
 		// Display
 		rectangle( Frame, origin, corner, Scalar(255,0,0), 1,1,0);
-		circle(Frame, X1, 2, Scalar::all(0), 3);
-		circle(Frame, X2, 2, Scalar::all(255), 3);
-		circle(Frame, X11, 2, Scalar::all(0), 3);
-		circle(Frame, X22, 2, Scalar::all(255), 3);
+		//circle(Frame, X1, 2, Scalar::all(0), 3);
+		//circle(Frame, X2, 2, Scalar::all(255), 3);
+		//circle(Frame, X11, 2, Scalar::all(0), 3);
+		//circle(Frame, X22, 2, Scalar::all(255), 3);
 //		rectangle( WeighImg, origin, corner, Scalar(255,0,0), 1,1,0);
 	//	flip(Frame, Frame,1);
 		imshow("Image Frame", Frame);
+		setMouseCallback("Image Frame", getCoordinates_onMouse, (XnDepthPixel*)pDepthMap);
+
 		imshow("Depth Frame", Depth);
 		imshow("Weigh Frame I", WeighImg_I);
 		imshow("Weigh Frame II", WeighImg_II);
+		flag = false;
 
+		int keyValue = -1;
+		if (clicked)
+		{
+			//BackProject the point
+			int depth = pDepthMap[Ycoor*XN_VGA_X_RES+Xcoor];
+			double x3D = ((Xcoor-kinectCamera.ox)*depth*FACTOR);
+			double y3D = ((Ycoor-kinectCamera.oy)*depth*FACTOR);
+			//Print the 3D point
+			cout << "3D point: " << x3D << ", " << y3D << ", " << depth <<"; 2D point: " << Xcoor << ", " << Ycoor << endl;
+
+			clicked = false;
+			cvWaitKey(0);
+		}
+		else
 		// Control
- 		int	keyValue = cvWaitKey(30);
+ 		keyValue = cvWaitKey(1);
 		if (keyValue==27) bContinueLoop = false;
 		if (keyValue==13) trackingMode = BUILD_MODEL;
+		if (keyValue==32) flag = true;
 
 		cout << "\r";
 	}
@@ -441,11 +496,12 @@ int Plane::frontoPlaneFit(const XnDepthPixel *Depths,Camera *intrinsics, Rect wi
 	return 0;
 }
 
-int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap ,Camera *intrinsics, Rect window, Mat& weighFrame_I, Mat& weighFrame_II)
+int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap ,Camera *intrinsics, Rect window, Mat& weighFrame_I, Mat& weighFrame_II, bool flag)
 {
 	int NumberOfPoints=0,iMin=window.y,jMin=window.x,iMax=iMin+window.height,jMax=jMin+window.width;
-	double x,y,z,w,e,en,we,wx,wy,sigmaX,sigmaY;
-	double sumXX=0.0,sumXY=0.0,sumXZ=0.0,sumYY=0.0,sumYZ=0.0,sumX=0.0,sumY=0.0,sumZ=0.0,sumW=0.0,sumEE=0.0;
+	double x,y,z,w,e,en,we,wx,wy, wz,sigmaX,sigmaY, sigmaZ;
+	double sumXX=0.0,sumXY=0.0,sumXZ=0.0,sumYY=0.0,sumYZ=0.0,sumX=0.0,sumY=0.0,sumZ=0.0,sumW=0.0,sumEE=0.0, sumZZ = 0.0;
+	int varXX, varYY;
 	double FACTOR = intrinsics->pSize/intrinsics->FocalLength;
 
 	// Local origin
@@ -453,6 +509,7 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 	float y0 = centroid.val[1];
 	float z0 = centroid.val[2];
 
+	//move the plane to new origin
 	parameters.val[2] += (parameters.val[0]*x0+parameters.val[1]*y0-z0);
 
 	// ITERATIVE FIT
@@ -465,10 +522,13 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 	while (numIteration++<MaxIterations)
 	{
 		NumberOfPoints = 0;
-		sumXX=0.0,sumXY=0.0,sumXZ=0.0,sumYY=0.0,sumYZ=0.0,sumX=0.0,sumY=0.0,sumZ=0.0,sumW=0.0;
+		sumXX=0.0,sumXY=0.0,sumXZ=0.0,sumYY=0.0,sumYZ=0.0,sumX=0.0,sumY=0.0,sumZ=0.0,sumW=0.0, sumZZ = 0.0;
+		varXX = varYY = 0.0;
 
 		Point centr2D = intrinsics->imageProject(centroid);
 		XnRGB24Pixel centrColor = rgbMap[centr2D.y*XN_VGA_X_RES+centr2D.x];
+
+//		outDebug << "jMin: " << jMin << "jMax: " << jMax << endl;
 
 		for (int i=iMin; i<iMax; i++)
 		{
@@ -481,8 +541,6 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 			if(depth!=0)
 			{
 				XnRGB24Pixel pointColor = rgbMap[i*XN_VGA_X_RES+j];
-				int r = centrColor.nBlue - pointColor.nBlue;
-				int t = powf(r, 2);
 				double dist = sqrt(powf((int)(centrColor.nBlue-pointColor.nBlue),2) + powf((int)(centrColor.nGreen-pointColor.nGreen),2) + powf((int)(centrColor.nRed-pointColor.nRed),2));
 				double distN = dist/30;
 				double wDist = TukeyBiweight(distN, 3.0);
@@ -492,19 +550,20 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 
 				if (wDist > 0.5)
 				{
-				x = ((j-intrinsics->ox)*depth*FACTOR)-x0;
-				y = ((i-intrinsics->oy)*depth*FACTOR)-y0;
-				z = (double)depth-z0;
+					x = ((j-intrinsics->ox)*depth*FACTOR)-x0;
+					y = ((i-intrinsics->oy)*depth*FACTOR)-y0;
+					z = (double)depth-z0;
 
-				e = z-(parameters.val[0]*x+parameters.val[1]*y+parameters.val[2]);
-				en = e/sqrt(residualVariance);
-				w = TukeyBiweight(en,3.0);
-				weithPtr_I[j] = w;
-
+					e = z-(parameters.val[0]*x+parameters.val[1]*y+parameters.val[2]);
+					en = e/sqrt(residualVariance);
+					w = TukeyBiweight(en,3.0);
+					weithPtr_I[j] = w;
+				
 				if(w>0.0)
 				{
 					wx = w*x;
 					wy = w*y;
+					wz = w*z;
 					we = w*e;
 
 					if (!init)
@@ -531,6 +590,7 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 					sumYY += wy*y;
 					sumXZ += wx*z;
 					sumYZ += wy*z;
+					sumZZ += wz*z;
 					sumEE += we*e;
 					sumX  += wx;
 					sumY  += wy;
@@ -539,14 +599,12 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 						
 					++NumberOfPoints;
 				}
-				}
 			}
 		}
 		}
-
+		}
 		if(sumW==0.0) return -1;
-
-		Matx33d LeftMatrix = Matx33d(sumXX,sumXY,sumX,sumXY,sumYY,sumY,sumX,sumY,sumW);
+		Matx33d LeftMatrix = Matx33d(sumXX,sumXY,sumX,sumXY,sumYY,sumY,sumX,sumY,sumW);
 		Matx31d RightVector = Matx31d(sumXZ,sumYZ,sumZ);
 		Matx33d Inverse = LeftMatrix.inv();
 		parameters = Inverse * RightVector;
@@ -557,12 +615,112 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		centroid.val[0]=sumX/sumW;
 		centroid.val[1]=sumY/sumW;
 		centroid.val[2]=sumZ/sumW;
-		//centroid += Matx31d(x0,y0,z0);
+		
+//		centroid += Matx31d(x0,y0,z0);
 
 		// Resize window
-//		sigmaX = powf(sumXX/sumW-powf(sumX/sumW,2.0),0.5);
-//		sigmaY = powf(sumYY/sumW-powf(sumY/sumW,2.0),0.5);
+		sigmaX = powf(sumXX/sumW-powf(sumX/sumW,2.0),0.5);
+		sigmaY = powf(sumYY/sumW-powf(sumY/sumW,2.0),0.5);
+		sigmaZ = powf(sumZZ/sumW-powf(sumZ/sumW,2.0),0.5); // std in z
 
+//		cout << "VarXX: " << varXX/sumW << endl;
+//		cout << "VARXX: " << varXX<< endl;
+//		outDebug << "*******************************************VARXX: " << varXX/sumW << endl;
+
+
+			
+//		cout << "SigmaX: " << sigmaX << " N: " << NumberOfPoints << "; sumW: " <<sumW  << "SumX: " << sumX << ": VarXX: " << varXX << endl;
+//		cout << "SigmaX: " << sigmaX << endl;
+//		cout << "SigmaZ: " << sigmaZ << endl;
+
+		normal.val[0] = parameters.val[0];
+		normal.val[1] = parameters.val[1];
+		normal.val[2] = -1.0;
+
+		Matx31d yOrt(0,1,0);
+		Matx31d xOrt(1,0,0);		
+
+		centroid += Matx31d(x0,y0,z0);
+
+		Matx31d orthogVecXZ = Mat(normal).cross(Mat(yOrt));
+		Matx31d orthogVecYZ = Mat(normal).cross(Mat(xOrt));
+//		orthogVecXZ(0) = -orthogVecXZ(0); orthogVecXZ(2) = -orthogVecXZ(2);
+//		orthogVecYZ(0) = -orthogVecYZ(0); orthogVecYZ(2) = -orthogVecYZ(2);
+
+		//normalize vectors
+		double normXZ=sqrt(powf(orthogVecXZ(0),2)+ powf(orthogVecXZ(1),2) + powf(orthogVecXZ(2),2));
+		orthogVecXZ(0) = orthogVecXZ(0)/normXZ;
+		orthogVecXZ(1) = orthogVecXZ(1)/normXZ;
+		orthogVecXZ(2) = orthogVecXZ(2)/normXZ;
+
+		double normYZ=sqrt(powf(orthogVecYZ(0),2)+ powf(orthogVecYZ(1),2) + powf(orthogVecYZ(2),2));
+		orthogVecYZ(0) /= normYZ;
+		orthogVecYZ(1) /= normYZ;
+		orthogVecYZ(2) /= normYZ;
+
+		double multFactX = sigmaX+(abs(sigmaZ*orthogVecXZ(2)));
+		double multFactY = sigmaY+(abs(sigmaZ*orthogVecYZ(2)));
+
+		//increase direction vector
+		orthogVecXZ(0) *= multFactX;
+		orthogVecXZ(1) *= multFactX;
+		orthogVecXZ(2) *= multFactX;
+		orthogVecYZ(0) *= multFactY;
+		orthogVecYZ(1) *= multFactY;
+		orthogVecYZ(2) *= multFactY;
+
+	
+		//	double zPos = orthogVecXZ(2) + orthogVecYZ(2);
+		//Matx31f rXY = centroid+Matx31d(orthogVecXZ(0), orthogVecYZ(1), zPos)*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
+		//Matx31f tXY = centroid-Matx31d(orthogVecXZ(0), orthogVecYZ(1), zPos)*2;
+
+		//Point c1 = intrinsics->imageProject(rXY);
+		//Point c2 = intrinsics->imageProject(tXY);
+
+//		cout << "SimgaZ*n: " << (sigmaZ*orthogVecXZ(2)) << endl;
+//		cout << "SigmaYZ: " << sigmaY+sigmaZ << endl;
+
+//		double zPos = orthogVecXZ(2);// + orthogVecYZ(2);
+		Matx31f rY = centroid+Matx31d(0, orthogVecYZ(1), orthogVecYZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
+		Matx31f tY = centroid-Matx31d(0, orthogVecYZ(1), orthogVecYZ(2))*2;
+
+		Matx31f r = centroid+Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
+		Matx31f t = centroid-Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;//*orthogVecXZ(0), sigmaY*orthogVecYZ(1), zPos)*2;
+
+		corner11 = intrinsics->imageProject(r);
+		corner22 = intrinsics->imageProject(t);
+
+		corner11Y = intrinsics->imageProject(rY);
+		corner22Y = intrinsics->imageProject(tY);
+
+		Point corner1, corner2;
+		corner2.x = corner11.x; corner1.y = corner11Y.y;
+		corner1.x = corner22.x; corner2.y = corner22Y.y;
+
+//		cout << "Corner 1: " << corner1.x << ", " << corner1.y << endl;
+//		cout << "Corner 2: " << corner2.x << ", " << corner2.y << endl;
+
+		//cout << "OrthogXZ: " << orthogVecXZ(0) << ", " << orthogVecXZ(1) << ", " << orthogVecXZ(2) << endl;
+		//cout << "SigmaX: " << sigmaX << endl;
+		//cout << "SigmaZ: " << sigmaZ << endl;
+		//cout << "Centroid: " << centroid(0) << ", " << centroid(1) << ", " << centroid(2) << endl;
+		//cout << "C1: " << r(0) << ", " << r(1) << ", " << r(2) << ": 2D: " << corner11.x << ", " << corner11.y << endl;
+		//cout << "C2: " << t(0) << ", " << t(1) << ", " << t(2) << ": 2D: " << corner22.x << ", " << corner22.y << endl;
+
+
+		//corner11.x -= 10;
+		//corner22.x += 10;
+		//corner11.y = 120;
+		//corner22.y = 120;
+
+		if (flag) flag = false;
+
+//		cout << "NumberOfPonits: " << NumberOfPoints << "; sumW: " <<sumW << endl;
+
+//		Point corner1 = intrinsics->imageProject(r);
+//		Point corner2 = intrinsics->imageProject(t);
+
+	/*	centrd -= Matx31d(x0,y0,z0);
 		sigmaX = sumXX/(sumW*20);
 		sigmaY = sumYY/(sumW*25);
 
@@ -581,7 +739,7 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		if (abs(minY - centroid(1)) > 200)
 			minY = centroid(1) - 200;
 		if (abs(maxY - centroid(1)) > 200)
-			maxY = centroid(1) + 200;
+			maxY = centroid(1) + 200;*/
 
 		//Matx31f c1 (minX, minY, centroid(2));
 		//c1(2) = parameters(0)*c1(0) + parameters(1)*c1(1) +  parameters(2);
@@ -591,27 +749,27 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		//Point corner1 = intrinsics->imageProject(c1);
 		//Point corner2 = intrinsics->imageProject(c2);
 
-		Matx31f tmp1(0, minY, centroid(2));
-		Matx31f tmp11(0, maxY, centroid(2));
-		tmp1(2) = parameters(0)*tmp1(0) + parameters(1)*tmp1(1) +  parameters(2);
-		tmp11(2) = parameters(0)*tmp11(0) + parameters(1)*tmp11(1) +  parameters(2);
-		tmp1 +=  Matx31d(x0,y0,z0); tmp11 +=  Matx31d(x0,y0,z0); 
-		X1 = intrinsics->imageProject(Matx31f(0, tmp1(1), tmp1(2)));
-		X11 = intrinsics->imageProject(Matx31f(0, tmp11(1), tmp11(2)));
+		//Matx31tmp1(0, minY, centroid(2));
+		//Matx31tmp11(0, maxY, centroid(2));
+		//tmp1(2= parameters(0)*tmp1(0) + parameters(1)*tmp1(1) +  parameters(2);
+		//tmp11( = parameters(0)*tmp11(0) + parameters(1)*tmp11(1) +  parameters(2);
+		//tmp1 + Matx31d(x0,y0,z0); tmp11 +=  Matx31d(x0,y0,z0); 
+		//X1 = irinsics->imageProject(Matx31f(0, tmp1(1), tmp1(2)));
+		//X11 = trinsics->imageProject(Matx31f(0, tmp11(1), tmp11(2)));
 
 
 
-		Matx31f tmp2(minX, 0, centroid(2));
-		Matx31f tmp22(maxX, 0, centroid(2));
-		tmp2(2) = parameters(0)*tmp2(0) + parameters(1)*tmp2(1) +  parameters(2);
-		tmp22(2) = parameters(0)*tmp22(0) + parameters(1)*tmp22(1) +  parameters(2);
-		tmp2 +=  Matx31d(x0,y0,z0); tmp22 +=  Matx31d(x0,y0,z0); 
-		X2 = intrinsics->imageProject(Matx31f(tmp2(0), 0, tmp2(2)));
-		X22 = intrinsics->imageProject(Matx31f(tmp22(0), 0, tmp22(2)));
+		//Matx31tmp2(minX, 0, centroid(2));
+		//Matx31tmp22(maxX, 0, centroid(2));
+		//tmp2(2= parameters(0)*tmp2(0) + parameters(1)*tmp2(1) +  parameters(2);
+		//tmp22( = parameters(0)*tmp22(0) + parameters(1)*tmp22(1) +  parameters(2);
+		//tmp2 + Matx31d(x0,y0,z0); tmp22 +=  Matx31d(x0,y0,z0); 
+		//X2 = irinsics->imageProject(Matx31f(tmp2(0), 0, tmp2(2)));
+		//X22 = trinsics->imageProject(Matx31f(tmp22(0), 0, tmp22(2)));
 
-		Point corner1, corner2;
-		corner1.x = X2.x; corner1.y = X1.y;
-		corner2.x = X22.x; corner2.y = X11.y;
+		//Point corner1, corner2;
+		//corner1.x = X2.x; corner1.y = X1.y;
+		//corner2.x = X22.x; corner2.y = X11.y;
 
 
 //		c1_3d = centroid-Matx31d(sigmaX, sigmaY, 0.0)*2.2;
@@ -661,7 +819,7 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		//corner1.x -= 100; corner1.y -= 70;
 		//corner2.x +=100; corner2.y += 70;
 
-		centroid += Matx31d(x0,y0,z0);
+//		centroid += Matx31d(x0,y0,z0);
 //		Point corner1 = intrinsics->imageProject(centroid-Matx31d(sigmaX,sigmaY,0.0)*2.2);
 //		Point corner2 = intrinsics->imageProject(centroid+Matx31d(sigmaX,sigmaY,0.0)*2.2);
 //		corner1.x = X2.x; corner2.x = X22.x;
@@ -672,8 +830,10 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		
 		fitWindow.y=iMin; fitWindow.height = iMax-iMin;
 		fitWindow.x=jMin; fitWindow.width  = jMax-jMin;
+
+//		ntroid += Matx31d(x0,y0,z0);
 	}
-	//centroid += Matx31d(x0,y0,z0);
+//	centroid += Matx31d(x0,y0,z0);
 	// move origin back to kinect coordinate system
 	parameters.val[2] -= (parameters.val[0]*x0+parameters.val[1]*y0-z0);
 
