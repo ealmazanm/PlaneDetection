@@ -519,8 +519,11 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		maxX = minX = maxY = minY = 0.0;
 		bool init = false;
 
+		double stdDev = 0.0;
 	while (numIteration++<MaxIterations)
 	{
+		double sumColorDistWeight = 0.0, sumWeight=0.0;
+
 		NumberOfPoints = 0;
 		sumXX=0.0,sumXY=0.0,sumXZ=0.0,sumYY=0.0,sumYZ=0.0,sumX=0.0,sumY=0.0,sumZ=0.0,sumW=0.0, sumZZ = 0.0;
 		varXX = varYY = 0.0;
@@ -541,14 +544,16 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 			if(depth!=0)
 			{
 				XnRGB24Pixel pointColor = rgbMap[i*XN_VGA_X_RES+j];
-				double dist = sqrt(powf((int)(centrColor.nBlue-pointColor.nBlue),2) + powf((int)(centrColor.nGreen-pointColor.nGreen),2) + powf((int)(centrColor.nRed-pointColor.nRed),2));
-				double distN = dist/30;
-				double wDist = TukeyBiweight(distN, 3.0);
-				weithPtr_II[j] = wDist;
-//outDebug << "Weight Distance: " << wDist << endl;				
-//outDebug << "Distance: " << dist << endl;				
-
-				if (wDist > 0.5)
+				float colorDist = powf(centrColor.nBlue-pointColor.nBlue,2) + powf(centrColor.nGreen-pointColor.nGreen,2) + powf(centrColor.nRed-pointColor.nRed,2);
+				double wColor = 1;
+				if (numIteration > 1)
+				{	
+					double colorDistN = colorDist/(3*stdDev); 
+					wColor = TukeyBiweight(colorDistN, 1.0);
+					weithPtr_II[j] = wColor;
+				//	cout << "ColorDist: " << colorDist << ", std: " << stdDev << ", Wcolor: " << wColor << endl;
+				}
+				if (wColor > 0.0)
 				{
 					x = ((j-intrinsics->ox)*depth*FACTOR)-x0;
 					y = ((i-intrinsics->oy)*depth*FACTOR)-y0;
@@ -557,50 +562,38 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 					e = z-(parameters.val[0]*x+parameters.val[1]*y+parameters.val[2]);
 					en = e/sqrt(residualVariance);
 					w = TukeyBiweight(en,3.0);
-					weithPtr_I[j] = w;
-				
-				if(w>0.0)
-				{
-					wx = w*x;
-					wy = w*y;
-					wz = w*z;
-					we = w*e;
-
-					if (!init)
+								
+					if(w>0.0)
 					{
-						minX = maxX = x;
-						minY = maxY = y;
-						init = true;
-					}
-					else
-					{
-						if (x > maxX)
-							maxX = x;
-						else if (x < minX)
-							minX = x;
-
-						if (y > maxY)
-							maxY = y;
-						else if (y < minY)
-							minY = y;
-					}
-			
-					sumXX += wx*x;
-					sumXY += wx*y;
-					sumYY += wy*y;
-					sumXZ += wx*z;
-					sumYZ += wy*z;
-					sumZZ += wz*z;
-					sumEE += we*e;
-					sumX  += wx;
-					sumY  += wy;
-					sumZ  += w*z;
-					sumW  += w;
+						sumColorDistWeight += (wColor*colorDist);
+						sumWeight += wColor;
 						
-					++NumberOfPoints;
+						weithPtr_I[j] = w;
+						wx = w*x;
+						wy = w*y;
+						wz = w*z;
+						we = w*e;
+
+
+						sumXX += wx*x;
+						sumXY += wx*y;
+						sumYY += wy*y;
+						sumXZ += wx*z;
+						sumYZ += wy*z;
+						sumZZ += wz*z;
+						sumEE += we*e;
+						sumX  += wx;
+						sumY  += wy;
+						sumZ  += w*z;
+						sumW  += w;
+
+						++NumberOfPoints;
+					}
+					else weithPtr_I[j]=0.0;
 				}
+				else weithPtr_I[j]=0.0;
 			}
-		}
+			else weithPtr_I[j]=0.0;
 		}
 		}
 		if(sumW==0.0) return -1;
@@ -616,22 +609,10 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		centroid.val[1]=sumY/sumW;
 		centroid.val[2]=sumZ/sumW;
 		
-//		centroid += Matx31d(x0,y0,z0);
-
 		// Resize window
 		sigmaX = powf(sumXX/sumW-powf(sumX/sumW,2.0),0.5);
 		sigmaY = powf(sumYY/sumW-powf(sumY/sumW,2.0),0.5);
 		sigmaZ = powf(sumZZ/sumW-powf(sumZ/sumW,2.0),0.5); // std in z
-
-//		cout << "VarXX: " << varXX/sumW << endl;
-//		cout << "VARXX: " << varXX<< endl;
-//		outDebug << "*******************************************VARXX: " << varXX/sumW << endl;
-
-
-			
-//		cout << "SigmaX: " << sigmaX << " N: " << NumberOfPoints << "; sumW: " <<sumW  << "SumX: " << sumX << ": VarXX: " << varXX << endl;
-//		cout << "SigmaX: " << sigmaX << endl;
-//		cout << "SigmaZ: " << sigmaZ << endl;
 
 		normal.val[0] = parameters.val[0];
 		normal.val[1] = parameters.val[1];
@@ -644,8 +625,6 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 
 		Matx31d orthogVecXZ = Mat(normal).cross(Mat(yOrt));
 		Matx31d orthogVecYZ = Mat(normal).cross(Mat(xOrt));
-//		orthogVecXZ(0) = -orthogVecXZ(0); orthogVecXZ(2) = -orthogVecXZ(2);
-//		orthogVecYZ(0) = -orthogVecYZ(0); orthogVecYZ(2) = -orthogVecYZ(2);
 
 		//normalize vectors
 		double normXZ=sqrt(powf(orthogVecXZ(0),2)+ powf(orthogVecXZ(1),2) + powf(orthogVecXZ(2),2));
@@ -669,23 +648,11 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		orthogVecYZ(1) *= multFactY;
 		orthogVecYZ(2) *= multFactY;
 
-	
-		//	double zPos = orthogVecXZ(2) + orthogVecYZ(2);
-		//Matx31f rXY = centroid+Matx31d(orthogVecXZ(0), orthogVecYZ(1), zPos)*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
-		//Matx31f tXY = centroid-Matx31d(orthogVecXZ(0), orthogVecYZ(1), zPos)*2;
-
-		//Point c1 = intrinsics->imageProject(rXY);
-		//Point c2 = intrinsics->imageProject(tXY);
-
-//		cout << "SimgaZ*n: " << (sigmaZ*orthogVecXZ(2)) << endl;
-//		cout << "SigmaYZ: " << sigmaY+sigmaZ << endl;
-
-//		double zPos = orthogVecXZ(2);// + orthogVecYZ(2);
-		Matx31f rY = centroid+Matx31d(0, orthogVecYZ(1), orthogVecYZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
+		Matx31f rY = centroid+Matx31d(0, orthogVecYZ(1), orthogVecYZ(2))*2;
 		Matx31f tY = centroid-Matx31d(0, orthogVecYZ(1), orthogVecYZ(2))*2;
 
-		Matx31f r = centroid+Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;
-		Matx31f t = centroid-Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;// sigmaY*orthogVecYZ(1)*2, zPos);//*2.2;//*orthogVecXZ(0), sigmaY*orthogVecYZ(1), zPos)*2;
+		Matx31f r = centroid+Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;
+		Matx31f t = centroid-Matx31d(orthogVecXZ(0), 0, orthogVecXZ(2))*2;
 
 		corner11 = intrinsics->imageProject(r);
 		corner22 = intrinsics->imageProject(t);
@@ -697,133 +664,7 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		corner2.x = corner11.x; corner1.y = corner11Y.y;
 		corner1.x = corner22.x; corner2.y = corner22Y.y;
 
-//		cout << "Corner 1: " << corner1.x << ", " << corner1.y << endl;
-//		cout << "Corner 2: " << corner2.x << ", " << corner2.y << endl;
-
-		//cout << "OrthogXZ: " << orthogVecXZ(0) << ", " << orthogVecXZ(1) << ", " << orthogVecXZ(2) << endl;
-		//cout << "SigmaX: " << sigmaX << endl;
-		//cout << "SigmaZ: " << sigmaZ << endl;
-		//cout << "Centroid: " << centroid(0) << ", " << centroid(1) << ", " << centroid(2) << endl;
-		//cout << "C1: " << r(0) << ", " << r(1) << ", " << r(2) << ": 2D: " << corner11.x << ", " << corner11.y << endl;
-		//cout << "C2: " << t(0) << ", " << t(1) << ", " << t(2) << ": 2D: " << corner22.x << ", " << corner22.y << endl;
-
-
-		//corner11.x -= 10;
-		//corner22.x += 10;
-		//corner11.y = 120;
-		//corner22.y = 120;
-
 		if (flag) flag = false;
-
-//		cout << "NumberOfPonits: " << NumberOfPoints << "; sumW: " <<sumW << endl;
-
-//		Point corner1 = intrinsics->imageProject(r);
-//		Point corner2 = intrinsics->imageProject(t);
-
-	/*	centrd -= Matx31d(x0,y0,z0);
-		sigmaX = sumXX/(sumW*20);
-		sigmaY = sumYY/(sumW*25);
-
-		Matx31f c1_3d, c2_3d;
-
-		minX -= 10;
-		maxX += 10;
-		minY -= 10;
-		maxY += 10;
-
-		if (abs(minX - centroid(0)) > 300)
-			minX = centroid(0) - 300;
-		if (abs(maxX - centroid(0)) > 300)
-			maxX = centroid(0) + 300;
-
-		if (abs(minY - centroid(1)) > 200)
-			minY = centroid(1) - 200;
-		if (abs(maxY - centroid(1)) > 200)
-			maxY = centroid(1) + 200;*/
-
-		//Matx31f c1 (minX, minY, centroid(2));
-		//c1(2) = parameters(0)*c1(0) + parameters(1)*c1(1) +  parameters(2);
-		//Matx31f c2 (maxX, maxY, centroid(2));
-		//c2(2) = parameters(0)*c2(0) + parameters(1)*c2(1) +  parameters(2);
-		//c1 += Matx31d(x0,y0,z0); c2 += Matx31d(x0,y0,z0);
-		//Point corner1 = intrinsics->imageProject(c1);
-		//Point corner2 = intrinsics->imageProject(c2);
-
-		//Matx31tmp1(0, minY, centroid(2));
-		//Matx31tmp11(0, maxY, centroid(2));
-		//tmp1(2= parameters(0)*tmp1(0) + parameters(1)*tmp1(1) +  parameters(2);
-		//tmp11( = parameters(0)*tmp11(0) + parameters(1)*tmp11(1) +  parameters(2);
-		//tmp1 + Matx31d(x0,y0,z0); tmp11 +=  Matx31d(x0,y0,z0); 
-		//X1 = irinsics->imageProject(Matx31f(0, tmp1(1), tmp1(2)));
-		//X11 = trinsics->imageProject(Matx31f(0, tmp11(1), tmp11(2)));
-
-
-
-		//Matx31tmp2(minX, 0, centroid(2));
-		//Matx31tmp22(maxX, 0, centroid(2));
-		//tmp2(2= parameters(0)*tmp2(0) + parameters(1)*tmp2(1) +  parameters(2);
-		//tmp22( = parameters(0)*tmp22(0) + parameters(1)*tmp22(1) +  parameters(2);
-		//tmp2 + Matx31d(x0,y0,z0); tmp22 +=  Matx31d(x0,y0,z0); 
-		//X2 = irinsics->imageProject(Matx31f(tmp2(0), 0, tmp2(2)));
-		//X22 = trinsics->imageProject(Matx31f(tmp22(0), 0, tmp22(2)));
-
-		//Point corner1, corner2;
-		//corner1.x = X2.x; corner1.y = X1.y;
-		//corner2.x = X22.x; corner2.y = X11.y;
-
-
-//		c1_3d = centroid-Matx31d(sigmaX, sigmaY, 0.0)*2.2;
-//		c2_3d = centroid+Matx31d(sigmaX, sigmaY, 0.0)*2.2;
-
-//		tmp1 = c1_3d; tmp11 = c2_3d;
-//		tmp1 +=  Matx31d(x0,y0,z0); tmp11 +=  Matx31d(x0,y0,z0);
-
-		
-//		X1 = intrinsics->imageProject(Matx31f(tmp1(0), 0, tmp1(2)));
-//		X11 = intrinsics->imageProject(Matx31f(tmp11(0), 0, tmp11(2)));
-
-		
-
-		//
-//		double normParam = sqrt(parameters.val[0]*parameters.val[0]+parameters.val[1]*parameters.val[1]+1.0);
-
-		//Angle that must rotate the Y axis
-//		double alphaAngleY = acos(parameters(0)/normParam);
-		//if alphaAngle > pi/2 then  clockwise rotation. Else counter clock wise rotation
-//		double betaAngleY = (-((CV_PI/2)-alphaAngleY))*1.4;
-
-//		double alphaAngleX = acos(parameters(1)/normParam);
-//		double betaAngleX = ((CV_PI/2)-alphaAngleX)*1.4;
-
-//		Matx33f rotY(cos(betaAngleY), 0, sin(betaAngleY), 0, 1, 0, -sin(betaAngleY), 0, cos(betaAngleY)); //clockwise (possitive angle)
-//		Matx33f rotX(1, 0, 0, 0, cos(betaAngleX), -sin(betaAngleX), 0,  sin(betaAngleX), cos(betaAngleX)); //clockwise (possitive angle)
-//		Matx33f rotTot = rotX*rotY;
-
-//		Matx31f c1Rot_3d = rotY*c1_3d;
-//		Matx31f c2Rot_3d = rotY*c2_3d;
-//		Matx31f c1Rot_3d = rotTot*c1_3d;
-//		Matx31f c2Rot_3d = rotTot*c2_3d;
-//		c1Rot_3d(2) = parameters(0)*c1Rot_3d(0)+parameters(1)*c1Rot_3d(1) + parameters(2);
-//		c2Rot_3d(2) = parameters(0)*c2Rot_3d(0)+parameters(1)*c2Rot_3d(1) + parameters(2);
-
-
-
-//		double Z_3d = parameters(0)*c1_3d(0)+parameters(1)*c1_3d(1) + parameters(2); //measure the difference with c1_3d(2)
-//		double ZRot_3d = parameters(0)*c1Rot_3d(0)+parameters(1)*c1Rot_3d(1) + parameters(2); //measure the difference with c1Rot_3d(2)
-		// The different should be bigger in Z_3d
-	
-//		c1Rot_3d += Matx31d(x0,y0,z0);
-//		c2Rot_3d += Matx31d(x0,y0,z0);
-//		X1 = intrinsics->imageProject(Matx31f(c1Rot_3d(0), 0, c1Rot_3d(2)));
-//		X11 = intrinsics->imageProject(Matx31f(c2Rot_3d(0), 0, c2Rot_3d(2)));
-		//corner1.x -= 100; corner1.y -= 70;
-		//corner2.x +=100; corner2.y += 70;
-
-//		centroid += Matx31d(x0,y0,z0);
-//		Point corner1 = intrinsics->imageProject(centroid-Matx31d(sigmaX,sigmaY,0.0)*2.2);
-//		Point corner2 = intrinsics->imageProject(centroid+Matx31d(sigmaX,sigmaY,0.0)*2.2);
-//		corner1.x = X2.x; corner2.x = X22.x;
-//		corner1.y = X1.y; corner2.y = X11.y;
 		iMin=corner1.y; jMin=corner1.x; iMax=corner2.y; jMax=corner2.x;
 		iMin=max(0,iMin); iMax=min(iMax,XN_VGA_Y_RES);
 		jMin=max(0,jMin); jMax=min(jMax,XN_VGA_X_RES);
@@ -831,9 +672,8 @@ int Plane::updatePlaneFit(const XnDepthPixel *Depths, const XnRGB24Pixel* rgbMap
 		fitWindow.y=iMin; fitWindow.height = iMax-iMin;
 		fitWindow.x=jMin; fitWindow.width  = jMax-jMin;
 
-//		ntroid += Matx31d(x0,y0,z0);
+		stdDev = (sumColorDistWeight/sumWeight)/1.5;
 	}
-//	centroid += Matx31d(x0,y0,z0);
 	// move origin back to kinect coordinate system
 	parameters.val[2] -= (parameters.val[0]*x0+parameters.val[1]*y0-z0);
 
